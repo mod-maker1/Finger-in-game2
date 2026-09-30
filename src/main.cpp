@@ -1,59 +1,76 @@
 #include <Geode/Geode.hpp>
 #include <Geode/modify/LevelEditorLayer.hpp>
-#include <Geode/cocos/touch_dispatcher/CCTouchDelegateProtocol.h>
 #include <Geode/cocos/touch_dispatcher/CCTouchDispatcher.h>
-#include <Geode/cocos/base_nodes/CCNode.h>
 #include <Geode/binding/GameObject.hpp>
 
 using namespace geode::prelude;
 using namespace cocos2d;
 
 namespace {
-    GameObject* findObjectAt(CCNode* node, CCPoint worldPoint) {
+    GameObject* findObjectAt(CCNode* node, CCPoint pointInNode) {
         if (!node || !node->isVisible())
             return nullptr;
 
         auto children = node->getChildren();
-        if (children) {
-            for (int i = static_cast<int>(children->count()) - 1; i >= 0; --i) {
-                auto child = static_cast<CCNode*>(children->objectAtIndex(i));
-                if (auto* hit = findObjectAt(child, worldPoint))
-                    return hit;
-            }
-        }
-
-        auto* object = typeinfo_cast<GameObject*>(node);
-        if (!object || !object->getParent())
+        if (!children)
             return nullptr;
 
-        auto local = object->convertToNodeSpace(worldPoint);
-        auto size = object->getContentSize();
-        CCRect rect(0.f, 0.f, size.width, size.height);
+        auto worldPoint = node->convertToWorldSpace(pointInNode);
 
-        if (rect.containsPoint(local))
-            return object;
+        for (int i = static_cast<int>(children->count()) - 1; i >= 0; --i) {
+            auto* child = static_cast<CCNode*>(children->objectAtIndex(i));
+
+            if (!child || !child->isVisible())
+                continue;
+
+            auto pointInChild = child->convertToNodeSpace(worldPoint);
+
+            if (auto* object = typeinfo_cast<GameObject*>(child)) {
+                auto size = object->getContentSize();
+
+                if (size.width > 0.f && size.height > 0.f) {
+                    CCRect rect(0.f, 0.f, size.width, size.height);
+
+                    if (rect.containsPoint(pointInChild))
+                        return object;
+                }
+            }
+
+            if (auto* hit = findObjectAt(child, pointInChild))
+                return hit;
+        }
 
         return nullptr;
     }
 
     class FingerDragLayer final : public CCLayer {
-    protected:
         GameObject* m_dragged = nullptr;
         CCPoint m_grabOffset = CCPointZero;
 
         bool ccTouchBegan(CCTouch* touch, CCEvent*) override {
-            auto* editor = typeinfo_cast<LevelEditorLayer*>(this->getParent());
+            auto* editor = typeinfo_cast<LevelEditorLayer*>(getParent());
+
             if (!editor)
                 return false;
 
-            auto* object = findObjectAt(editor, touch->getLocation());
-            if (!object || !object->getParent())
+            auto editorPoint =
+                editor->convertToNodeSpace(touch->getLocation());
+
+            m_dragged = findObjectAt(editor, editorPoint);
+
+            if (!m_dragged || !m_dragged->getParent()) {
+                m_dragged = nullptr;
                 return false;
+            }
 
-            m_dragged = object;
+            auto parentPoint =
+                m_dragged->getParent()->convertToNodeSpace(
+                    touch->getLocation()
+                );
 
-            auto parentPoint = object->getParent()->convertToNodeSpace(touch->getLocation());
-            m_grabOffset = object->getPosition() - parentPoint;
+            m_grabOffset = m_dragged->getPosition() - parentPoint;
+
+            log::info("Finger Drag: object grabbed");
 
             return true;
         }
@@ -62,7 +79,11 @@ namespace {
             if (!m_dragged || !m_dragged->getParent())
                 return;
 
-            auto parentPoint = m_dragged->getParent()->convertToNodeSpace(touch->getLocation());
+            auto parentPoint =
+                m_dragged->getParent()->convertToNodeSpace(
+                    touch->getLocation()
+                );
+
             m_dragged->setPosition(parentPoint + m_grabOffset);
         }
 
@@ -77,16 +98,22 @@ namespace {
         }
 
         void registerWithTouchDispatcher() override {
-            CCTouchDispatcher::get()->addTargetedDelegate(this, -100000, true);
+            CCTouchDispatcher::get()->addTargetedDelegate(
+                this,
+                -1000000,
+                true
+            );
         }
 
     public:
         static FingerDragLayer* create() {
             auto* ret = new FingerDragLayer();
+
             if (ret && ret->init()) {
                 ret->autorelease();
                 return ret;
             }
+
             CC_SAFE_DELETE(ret);
             return nullptr;
         }
@@ -95,7 +122,7 @@ namespace {
             if (!CCLayer::init())
                 return false;
 
-            this->setTouchEnabled(true);
+            setTouchEnabled(true);
             return true;
         }
     };
@@ -107,14 +134,17 @@ class $modify(FingerDragLevelEditorLayer, LevelEditorLayer) {
             return false;
 
         auto* dragLayer = FingerDragLayer::create();
+
         if (!dragLayer)
             return true;
 
-        dragLayer->setContentSize(this->getContentSize());
+        dragLayer->setContentSize(getContentSize());
         dragLayer->setPosition(CCPointZero);
-        this->addChild(dragLayer, 1000000);
+
+        addChild(dragLayer, 1000000);
 
         log::info("Finger Drag: editor touch layer enabled");
+
         return true;
     }
 };
