@@ -1,0 +1,11 @@
+{
+  "geode": "v5.10.1",
+  "gd": {
+    "android": "2.2081"
+  },
+  "id": "andrey.finger-drag",
+  "name": "Finger Drag",
+  "version": "v1.0.2",
+  "developer": "Andrey",
+  "description": "Drag Geometry Dash editor objects with a finger on Android."
+}
